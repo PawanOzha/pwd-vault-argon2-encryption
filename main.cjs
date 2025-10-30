@@ -167,6 +167,8 @@ const createWindow = async (port) => {
   mainWindow = new BrowserWindow({
     width: 900,
     height: 600,
+    minWidth: 800,
+    minHeight: 600,
     frame: false, // This removes the default window frame
     webPreferences: {
       nodeIntegration: false,

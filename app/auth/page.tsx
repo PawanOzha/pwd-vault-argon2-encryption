@@ -154,7 +154,7 @@ export default function AuthPage() {
   return (
     <div className="h-screen bg-[#262624] flex flex-col overflow-hidden">
       {/* ===== HEADER / TITLE BAR ===== */}
-      <header className="h-14 bg-[#30302E] border-b border-[#3a3a38]">
+      <header className="h-14 drag bg-[#30302E] border-b border-[#3a3a38]">
         <div className="flex items-center justify-between h-full px-4">
           {/* Left: App Name & Logo */}
           <div className="flex items-center gap-3">
@@ -165,7 +165,7 @@ export default function AuthPage() {
           </div>
 
           {/* Right: Window Controls */}
-          <div className="flex items-center gap-2">
+          <div className="flex no-drag items-center gap-2">
             <button
               onClick={handleMinimize}
               className="p-2 hover:bg-[#262624] rounded-lg transition-colors text-gray-400 hover:text-white"

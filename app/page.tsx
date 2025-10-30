@@ -21,11 +21,11 @@ export default function HomePage() {
     <div className="h-screen bg-[#262624] flex flex-col overflow-hidden">
       {/* <DraggableTitleBar /> */}
       {/* ===== HEADER / TITLE BAR ===== */}
-      <header className="h-14 bg-[#30302E] border-b border-[#3a3a38]">
+      <header className="h-14 drag bg-[#30302E] border-b border-[#3a3a38]">
         <div className="flex items-center justify-between h-full px-4">
           {/* Left: App Name & Logo */}
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-8 h-8 bg-[#D97757] rounded-lg">
+            <div className="flex  items-center justify-center w-8 h-8 bg-[#D97757] rounded-lg">
               <Lock className="w-4 h-4 text-white" />
             </div>
             <div className="text-sm font-bold text-white">SecureVault</div>
@@ -35,7 +35,7 @@ export default function HomePage() {
           <div className="flex items-center gap-2">
             <button
               onClick={handleMinimize}
-              className="p-2 hover:bg-[#262624] rounded-lg transition-colors text-gray-400 hover:text-white"
+              className="p-2 no-drag hover:bg-[#262624] rounded-lg transition-colors text-gray-400 hover:text-white"
               title="Minimize"
             >
               <Minus className="w-4 h-4" />
@@ -43,7 +43,7 @@ export default function HomePage() {
             
             <button
               onClick={handleClose}
-              className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-gray-400 hover:text-red-400"
+              className="p-2 no-drag hover:bg-red-500/10 rounded-lg transition-colors text-gray-400 hover:text-red-400"
               title="Close"
             >
               <X className="w-4 h-4" />

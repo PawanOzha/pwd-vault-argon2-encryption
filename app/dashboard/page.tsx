@@ -2,11 +2,12 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { 
-  Eye, EyeOff, Plus, Edit2, Trash2, X, Search, User, Minimize2, XCircle, 
+import {
+  Eye, EyeOff, Plus, Edit2, Trash2, X, Search, User, Minimize2, XCircle,
   Lock, FolderPlus, Copy, ExternalLink, CheckCircle, AlertCircle,
   LogOut, ChevronDown, Minus
 } from 'lucide-react';
+import DraggableTitleBar from '@/components/DraggableTitlebar';
 
 // ============================================================================
 // TOAST COMPONENT
@@ -22,13 +23,12 @@ const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[]; removeToast:
     {toasts.map(toast => (
       <div
         key={toast.id}
-        className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl backdrop-blur border animate-in slide-in-from-right duration-200 text-sm font-medium ${
-          toast.type === 'success'
+        className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl backdrop-blur border animate-in slide-in-from-right duration-200 text-sm font-medium ${toast.type === 'success'
             ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
             : toast.type === 'error'
-            ? 'bg-red-500/10 border-red-500/20 text-red-400'
-            : 'bg-[#D97757]/10 border-[#D97757]/20 text-[#D97757]'
-        }`}
+              ? 'bg-red-500/10 border-red-500/20 text-red-400'
+              : 'bg-[#D97757]/10 border-[#D97757]/20 text-[#D97757]'
+          }`}
       >
         {toast.type === 'success' && <CheckCircle className="w-4 h-4 flex-shrink-0" />}
         {toast.type === 'error' && <AlertCircle className="w-4 h-4 flex-shrink-0" />}
@@ -42,19 +42,19 @@ const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[]; removeToast:
 // ============================================================================
 // DELETE CONFIRMATION MODAL
 // ============================================================================
-const DeleteConfirmModal = ({ 
-  isOpen, 
-  title, 
-  onConfirm, 
-  onCancel 
-}: { 
-  isOpen: boolean; 
-  title: string; 
-  onConfirm: () => void; 
+const DeleteConfirmModal = ({
+  isOpen,
+  title,
+  onConfirm,
+  onCancel
+}: {
+  isOpen: boolean;
+  title: string;
+  onConfirm: () => void;
   onCancel: () => void;
 }) => {
   if (!isOpen) return null;
-  
+
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-[#30302E] rounded-2xl w-full max-w-sm shadow-2xl border border-[#3a3a38] animate-in zoom-in-95 duration-200">
@@ -143,17 +143,17 @@ export default function DashboardPage() {
   const [searchActive, setSearchActive] = useState(false);
   const [showPassword, setShowPassword] = useState<{ [key: number]: boolean }>({});
   const [copiedId, setCopiedId] = useState<number | null>(null);
-  
+
   // Toasts
   const [toasts, setToasts] = useState<Toast[]>([]);
-  
+
   // Modals
   const [showCredentialModal, setShowCredentialModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'credential' | 'category'; id: number; title: string } | null>(null);
   const [editingCredential, setEditingCredential] = useState<Credential | null>(null);
-  
+
   // Form states
   const [credentialForm, setCredentialForm] = useState({
     title: '',
@@ -163,7 +163,7 @@ export default function DashboardPage() {
     description: '',
     categoryId: null as number | null
   });
-  
+
   const [categoryForm, setCategoryForm] = useState({
     name: '',
     preset: 'vault'
@@ -213,11 +213,16 @@ export default function DashboardPage() {
   }, [router]);
 
   // ========== LOAD DATA WHEN UNLOCKED ==========
-  useEffect(() => {
-    if (masterPassword && user) {
-      loadData();
+// Run once after user authenticated
+useEffect(() => {
+  if (user) {
+    const sessionMP = sessionStorage.getItem('masterPassword');
+    if (sessionMP) {
+      setMasterPassword(sessionMP);
+      loadData(); // safe: only runs once when app loads
     }
-  }, [masterPassword, user]);
+  }
+}, [user]);
 
   // ========== DEBUG LOGGER ==========
   useEffect(() => {
@@ -240,21 +245,21 @@ export default function DashboardPage() {
       const authRes = await fetch('/api/auth/verify', {
         credentials: 'include'
       });
-      
+
       if (!authRes.ok) {
         window.location.href = '/';
         return;
       }
-      
+
       const authData = await authRes.json();
       console.log('Auth data received:', authData);
-      
+
       setUser(authData.user);
-      
+
       // Check if master password exists in session storage
       const sessionMP = sessionStorage.getItem('masterPassword');
       console.log('Master password in session:', !!sessionMP);
-      
+
       if (sessionMP) {
         setMasterPassword(sessionMP);
       } else {
@@ -262,7 +267,7 @@ export default function DashboardPage() {
         console.log('No master password found, showing prompt');
         setShowMasterPasswordPrompt(true);
       }
-      
+
       setLoading(false);
     } catch (error) {
       console.error('Auth error:', error);
@@ -275,17 +280,17 @@ export default function DashboardPage() {
       console.error('loadData called without master password');
       return;
     }
-    
+
     try {
       setError(null);
       setLoading(true);
-      
+
       console.log('Loading categories and credentials...');
 
       const [catRes, credRes] = await Promise.all([
         fetch('/api/categories', { credentials: 'include' }),
-        fetch(`/api/credentials?masterPassword=${encodeURIComponent(masterPassword)}`, { 
-          credentials: 'include' 
+        fetch(`/api/credentials?masterPassword=${encodeURIComponent(masterPassword)}`, {
+          credentials: 'include'
         })
       ]);
 
@@ -297,7 +302,7 @@ export default function DashboardPage() {
         console.error('Category fetch error:', catError);
         throw new Error('Failed to load categories');
       }
-      
+
       if (!credRes.ok) {
         const credError = await credRes.json();
         console.error('Credentials fetch error:', credError);
@@ -312,13 +317,13 @@ export default function DashboardPage() {
 
       setCategories(catData.categories || []);
       setCredentials(credData.credentials || []);
-      
+
       // Store in session for persistence
       sessionStorage.setItem('masterPassword', masterPassword);
-      
+
       // Hide the prompt on success
       setShowMasterPasswordPrompt(false);
-      
+
       addToast('Vault unlocked', 'success');
     } catch (error: any) {
       console.error('Load data error:', error);
@@ -372,17 +377,17 @@ export default function DashboardPage() {
 
   const handleCreateCredential = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!masterPassword) {
       addToast('Please unlock your vault first', 'error');
       return;
     }
-    
+
     if (!credentialForm.title || !credentialForm.password) {
       addToast('Title and password are required', 'error');
       return;
     }
-    
+
     try {
       const res = await fetch('/api/credentials', {
         method: 'POST',
@@ -425,7 +430,7 @@ export default function DashboardPage() {
       const res = await fetch('/api/credentials', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           id: editingCredential.id,
           categoryId: credentialForm.categoryId,
           title: credentialForm.title,
@@ -473,7 +478,7 @@ export default function DashboardPage() {
 
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!categoryForm.name) {
       addToast('Category name is required', 'error');
       return;
@@ -494,14 +499,14 @@ export default function DashboardPage() {
       if (res.ok) {
         setShowCategoryModal(false);
         setCategoryForm({ name: '', preset: 'vault' });
-        
+
         // Immediately fetch updated categories
         const catRes = await fetch('/api/categories', { credentials: 'include' });
         if (catRes.ok) {
           const catData = await catRes.json();
           setCategories(catData.categories || []);
         }
-        
+
         addToast('Category created', 'success');
       } else {
         const data = await res.json();
@@ -566,7 +571,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen  bg-[#262624]">
       {/* ===== HEADER / TITLE BAR ===== */}
-      <header className="fixed top-0 left-0 right-0 h-14 bg-[#30302E] border-b border-[#3a3a38] z-40">
+      <header className="fixed top-0 drag left-0 right-0 h-14 bg-[#30302E] border-b border-[#3a3a38] z-40">
         <div className="flex items-center justify-between h-full px-4 ">
           {/* Left: App Name & Logo */}
           <div className="flex items-center gap-3 min-w-fit">
@@ -577,7 +582,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Center: Search Bar */}
-          <div className="flex-1 max-w-xl mx-8">
+          <div className="flex-1 no-drag max-w-xl mx-8">
             <div className="relative group">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-500" />
               <input
@@ -594,7 +599,7 @@ export default function DashboardPage() {
                     setSearchTerm('');
                     setSearchActive(false);
                   }}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-300"
+                  className="absolute no-drag right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-300"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -603,14 +608,14 @@ export default function DashboardPage() {
           </div>
 
           {/* Right: User Welcome & Window Controls */}
-          <div className="flex items-center gap-4">
+          <div className="flex no-drag items-center gap-4">
             <div className="text-right">
               <div className="text-sm font-medium text-white">Welcome, {user?.username}</div>
               <div className="text-xs text-emerald-400 font-medium">● Vault Unlocked</div>
             </div>
-            
+
             <div className="h-8 w-px bg-[#3a3a38]"></div>
-            
+
             <button
               onClick={handleMinimize}
               className="p-2 hover:bg-[#262624] rounded-lg transition-colors text-gray-400 hover:text-white"
@@ -618,7 +623,7 @@ export default function DashboardPage() {
             >
               <Minus className="w-4 h-4" />
             </button>
-            
+
             <button
               onClick={handleClose}
               className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-gray-400 hover:text-red-400"
@@ -671,14 +676,13 @@ export default function DashboardPage() {
             {/* Categories */}
             <div className="pt-3 border-t border-[#3a3a38]">
               <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 px-1">Categories</h3>
-              
+
               <button
                 onClick={() => setSelectedCategory('all')}
-                className={`w-full text-left px-3 py-2.5 rounded-xl transition-colors text-sm font-medium mb-2 ${
-                  selectedCategory === 'all' 
-                    ? 'bg-[#D97757] text-white' 
+                className={`w-full text-left px-3 py-2.5 rounded-xl transition-colors text-sm font-medium mb-2 ${selectedCategory === 'all'
+                    ? 'bg-[#D97757] text-white'
                     : 'text-gray-400 hover:bg-[#262624]'
-                }`}
+                  }`}
               >
                 <div className="flex items-center justify-between">
                   <span>All Passwords</span>
@@ -688,11 +692,10 @@ export default function DashboardPage() {
 
               <button
                 onClick={() => setSelectedCategory(null)}
-                className={`w-full text-left px-3 py-2.5 rounded-xl transition-colors text-sm font-medium mb-3 ${
-                  selectedCategory === null 
-                    ? 'bg-[#D97757] text-white' 
+                className={`w-full text-left px-3 py-2.5 rounded-xl transition-colors text-sm font-medium mb-3 ${selectedCategory === null
+                    ? 'bg-[#D97757] text-white'
                     : 'text-gray-400 hover:bg-[#262624]'
-                }`}
+                  }`}
               >
                 <div className="flex items-center justify-between">
                   <span>Uncategorized</span>
@@ -707,11 +710,10 @@ export default function DashboardPage() {
                   <button
                     key={cat.id}
                     onClick={() => setSelectedCategory(cat.id)}
-                    className={`w-full text-left px-3 py-2.5 rounded-xl transition-colors text-sm font-medium ${
-                      selectedCategory === cat.id 
-                        ? 'bg-[#D97757] text-white' 
+                    className={`w-full text-left px-3 py-2.5 rounded-xl transition-colors text-sm font-medium ${selectedCategory === cat.id
+                        ? 'bg-[#D97757] text-white'
                         : 'text-gray-400 hover:bg-[#262624]'
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -750,9 +752,9 @@ export default function DashboardPage() {
               {/* Page Header */}
               <div className="mb-6">
                 <h1 className="text-2xl font-bold text-white mb-1">
-                  {selectedCategory === 'all' ? 'All Passwords' : 
-                   selectedCategory === null ? 'Uncategorized' :
-                   categories.find(c => c.id === selectedCategory)?.name || 'Passwords'}
+                  {selectedCategory === 'all' ? 'All Passwords' :
+                    selectedCategory === null ? 'Uncategorized' :
+                      categories.find(c => c.id === selectedCategory)?.name || 'Passwords'}
                 </h1>
                 <p className="text-sm text-gray-500">{filteredCredentials.length} credentials</p>
               </div>
@@ -777,8 +779,8 @@ export default function DashboardPage() {
               ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-2 gap-4">
                   {filteredCredentials.map(cred => (
-                    <div 
-                      key={cred.id} 
+                    <div
+                      key={cred.id}
                       className="bg-[#30302E] border border-[#3a3a38] rounded-2xl overflow-hidden hover:border-[#D97757]/30 transition-all duration-300 group"
                     >
                       {/* Card Header */}
@@ -847,7 +849,7 @@ export default function DashboardPage() {
                             </div>
                           </div>
                         )}
-                        
+
                         <div className="space-y-1">
                           <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Password</label>
                           <div className="flex items-center justify-between p-2.5 bg-[#262624] rounded-lg group/field border border-[#3a3a38]">
@@ -871,15 +873,15 @@ export default function DashboardPage() {
                                 className="p-1.5 text-gray-500 hover:text-[#D97757] hover:bg-[#30302E] rounded transition-colors"
                                 title={showPassword[cred.id] ? "Hide" : "Show"}
                               >
-                                {showPassword[cred.id] ? 
-                                  <EyeOff className="w-3.5 h-3.5" /> : 
+                                {showPassword[cred.id] ?
+                                  <EyeOff className="w-3.5 h-3.5" /> :
                                   <Eye className="w-3.5 h-3.5" />
                                 }
                               </button>
                             </div>
                           </div>
                         </div>
-                        
+
                         {cred.description && (
                           <div className="space-y-1 pt-1">
                             <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Notes</label>
@@ -891,10 +893,10 @@ export default function DashboardPage() {
                       {/* Card Footer */}
                       <div className="px-5 py-3 bg-[#262624] border-t border-[#3a3a38]">
                         <p className="text-xs text-gray-600">
-                          Created {new Date(cred.created_at).toLocaleDateString('en-US', { 
-                            month: 'short', 
-                            day: 'numeric', 
-                            year: 'numeric' 
+                          Created {new Date(cred.created_at).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric'
                           })}
                         </p>
                       </div>
@@ -915,7 +917,7 @@ export default function DashboardPage() {
               <h3 className="text-lg font-bold text-white">
                 {editingCredential ? 'Edit Password' : 'New Password'}
               </h3>
-              <button 
+              <button
                 onClick={() => {
                   setShowCredentialModal(false);
                   resetCredentialForm();
@@ -1027,7 +1029,7 @@ export default function DashboardPage() {
           <div className="bg-[#30302E] rounded-2xl w-full max-w-md shadow-2xl border border-[#3a3a38] animate-in zoom-in-95 duration-200">
             <div className="border-b border-[#3a3a38] p-5 flex items-center justify-between">
               <h3 className="text-lg font-bold text-white">New Category</h3>
-              <button 
+              <button
                 onClick={() => setShowCategoryModal(false)}
                 className="p-2 hover:bg-[#262624] rounded-lg transition-colors text-gray-400 hover:text-white"
               >
@@ -1044,11 +1046,10 @@ export default function DashboardPage() {
                       key={preset.id}
                       type="button"
                       onClick={() => setCategoryForm({ ...categoryForm, preset: preset.id })}
-                      className={`p-4 rounded-xl border-2 transition-colors text-center ${
-                        categoryForm.preset === preset.id
+                      className={`p-4 rounded-xl border-2 transition-colors text-center ${categoryForm.preset === preset.id
                           ? 'border-[#D97757] bg-[#D97757]/10'
                           : 'border-[#3a3a38] bg-[#262624] hover:border-[#4a4a48]'
-                      }`}
+                        }`}
                     >
                       <div
                         className="w-6 h-6 rounded-full mx-auto mb-2"
@@ -1095,12 +1096,43 @@ export default function DashboardPage() {
       {/* ===== MASTER PASSWORD PROMPT ===== */}
       {showMasterPasswordPrompt && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          
+        {/* <DraggableTitleBar /> */}
+          <header className="h-14 drag absolute w-full top-0 bg-[#30302E] border-b border-[#3a3a38]">
+            <div className="flex items-center justify-between h-full px-4">
+              {/* Left: App Name & Logo */}
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center w-8 h-8 bg-[#D97757] rounded-lg">
+                  <Lock className="w-4 h-4 text-white" />
+                </div>
+                <div className="text-sm font-bold text-white">SecureVault</div>
+              </div>
+
+              {/* Right: Window Controls */}
+              <div className="flex no-drag items-center gap-2">
+                <button
+                  onClick={handleMinimize}
+                  className="p-2 hover:bg-[#262624] rounded-lg transition-colors text-gray-400 hover:text-white"
+                  title="Minimize"
+                >
+                  <Minus className="w-4 h-4" />
+                </button>
+
+                <button
+                  onClick={handleClose}
+                  className="p-2 hover:bg-red-500/10 rounded-lg transition-colors text-gray-400 hover:text-red-400"
+                  title="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </header>
+          {/* <DraggableTitleBar /> */}
           <div className="bg-[#30302E] rounded-2xl w-full max-w-sm shadow-2xl border border-[#3a3a38]">
             <div className="p-6 border-b border-[#3a3a38] text-center">
               <div className="inline-flex items-center justify-center w-12 h-12 bg-[#D97757]/10 rounded-xl mb-4">
                 <Lock className="w-6 h-6 text-[#D97757]" />
-                
+
               </div>
               <h3 className="text-lg font-bold text-white mb-1">Unlock Your Vault</h3>
               <p className="text-sm text-gray-400">Enter your password to decrypt your vault</p>
