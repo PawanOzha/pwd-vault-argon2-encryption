@@ -8,6 +8,8 @@ const isDev = process.env.NODE_ENV !== 'production';
 const PORT = process.env.PORT || 3000;
 let mainWindow;
 let nextServer;
+let serverPort;
+let stickyNoteWindows = new Map(); // Store all sticky note windows by note ID
 
 // Function to check if port is in use
 const isPortInUse = (port) => {
@@ -97,6 +99,7 @@ const killProcessOnPort = async (port) => {
 const startNextServer = async () => {
   // Find an available port
   const availablePort = await findAvailablePort(PORT);
+  serverPort = availablePort;
   
   return new Promise((resolve, reject) => {
     const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -162,33 +165,30 @@ const startNextServer = async () => {
   });
 };
 
-// Create Electron window
+// Create Main Electron window
 const createWindow = async (port) => {
   mainWindow = new BrowserWindow({
     width: 900,
     height: 600,
     minWidth: 800,
     minHeight: 600,
-    frame: false, // This removes the default window frame
+    frame: false,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.cjs'),
-      webSecurity: !isDev // Disable in dev, enable in production
+      webSecurity: !isDev
     },
-    icon: path.join(__dirname, 'public/favicon.ico'), // Update path as needed
-    show: false // Don't show until ready
+    icon: path.join(__dirname, 'public/favicon.ico'),
+    show: false
   });
 
-  // Show window when ready
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
   });
 
-  // Load the Next.js app
   await mainWindow.loadURL(`http://localhost:${port}`);
 
-  // Open DevTools in development
   if (isDev) {
     mainWindow.webContents.openDevTools();
   }
@@ -198,7 +198,85 @@ const createWindow = async (port) => {
   });
 };
 
-// IPC handlers for window controls
+// ============================================================================
+// CREATE FLOATING STICKY NOTE WINDOW
+// ============================================================================
+const createStickyNoteWindow = (noteId, noteData = {}) => {
+  console.log('Creating sticky note window for note:', noteId);
+
+  // Check if window already exists
+  if (stickyNoteWindows.has(noteId)) {
+    const existingWindow = stickyNoteWindows.get(noteId);
+    if (!existingWindow.isDestroyed()) {
+      existingWindow.focus();
+      return;
+    }
+  }
+
+  // Create new sticky note window
+  const noteWindow = new BrowserWindow({
+    width: noteData.width || 300,
+    height: noteData.height || 400,
+    x: noteData.x || undefined,
+    y: noteData.y || undefined,
+    minWidth: 300,
+    minHeight: 400,
+    frame: false, // Custom titlebar
+    alwaysOnTop: noteData.alwaysOnTop !== false, // Default to always on top
+    skipTaskbar: false,
+    resizable: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.cjs'),
+      webSecurity: !isDev
+    },
+    backgroundColor: '#30302E',
+    show: false
+  });
+
+  // Store window reference
+  stickyNoteWindows.set(noteId, noteWindow);
+
+  // Show when ready
+  noteWindow.once('ready-to-show', () => {
+    noteWindow.show();
+  });
+
+  // Load the sticky note page
+  noteWindow.loadURL(`http://localhost:${serverPort}/sticky-note/${noteId}`);
+
+  // Open DevTools in development
+  if (isDev) {
+    noteWindow.webContents.openDevTools();
+  }
+
+  // Save window position and size when moved or resized
+  const saveWindowBounds = () => {
+    if (!noteWindow.isDestroyed()) {
+      const bounds = noteWindow.getBounds();
+      // Send bounds to renderer to save to database
+      noteWindow.webContents.send('window-bounds-changed', bounds);
+    }
+  };
+
+  noteWindow.on('resize', saveWindowBounds);
+  noteWindow.on('move', saveWindowBounds);
+
+  // Cleanup on close
+  noteWindow.on('closed', () => {
+    stickyNoteWindows.delete(noteId);
+    console.log('Sticky note window closed:', noteId);
+  });
+
+  return noteWindow;
+};
+
+// ============================================================================
+// IPC HANDLERS
+// ============================================================================
+
+// Window control handlers for main window
 ipcMain.on('window-minimize', () => {
   if (mainWindow) {
     mainWindow.minimize();
@@ -221,13 +299,66 @@ ipcMain.on('window-close', () => {
   }
 });
 
+// Sticky note window handlers
+ipcMain.on('sticky-note-minimize', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window) {
+    window.minimize();
+  }
+});
+
+ipcMain.on('sticky-note-close', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window) {
+    window.close();
+  }
+});
+
+ipcMain.on('sticky-note-toggle-always-on-top', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window) {
+    const isAlwaysOnTop = window.isAlwaysOnTop();
+    window.setAlwaysOnTop(!isAlwaysOnTop);
+    event.reply('sticky-note-always-on-top-changed', !isAlwaysOnTop);
+  }
+});
+
+// Create/Open sticky note window
+ipcMain.on('open-sticky-note', (event, noteId, noteData) => {
+  console.log('Received open-sticky-note request:', noteId);
+  createStickyNoteWindow(noteId, noteData);
+});
+
+// Close specific sticky note window
+ipcMain.on('close-sticky-note-window', (event, noteId) => {
+  if (stickyNoteWindows.has(noteId)) {
+    const window = stickyNoteWindows.get(noteId);
+    if (!window.isDestroyed()) {
+      window.close();
+    }
+    stickyNoteWindows.delete(noteId);
+  }
+});
+
+// Get window bounds
+ipcMain.handle('get-window-bounds', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window) {
+    return window.getBounds();
+  }
+  return null;
+});
+
 // IPC handlers for other messages
 ipcMain.on('app-message', (event, arg) => {
   console.log('Received message from renderer:', arg);
   event.reply('app-reply', 'Message received');
 });
 
-// App event handlers
+// ============================================================================
+// APP EVENT HANDLERS
+// ============================================================================
+
 app.whenReady().then(async () => {
   try {
     console.log('Starting Next.js server...');
@@ -262,6 +393,14 @@ app.on('activate', async () => {
 });
 
 app.on('before-quit', () => {
+  // Close all sticky note windows
+  stickyNoteWindows.forEach((window, noteId) => {
+    if (!window.isDestroyed()) {
+      window.close();
+    }
+  });
+  stickyNoteWindows.clear();
+
   if (nextServer) {
     nextServer.kill('SIGTERM');
   }

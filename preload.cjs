@@ -8,6 +8,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
   
+  // Sticky note window control methods
+  stickyNoteMinimize: () => ipcRenderer.send('sticky-note-minimize'),
+  stickyNoteClose: () => ipcRenderer.send('sticky-note-close'),
+  stickyNoteToggleAlwaysOnTop: () => ipcRenderer.send('sticky-note-toggle-always-on-top'),
+  
+  // Sticky note management
+  openStickyNote: (noteId, noteData) => ipcRenderer.send('open-sticky-note', noteId, noteData),
+  closeStickyNoteWindow: (noteId) => ipcRenderer.send('close-sticky-note-window', noteId),
+  
+  // Window bounds
+  getWindowBounds: () => ipcRenderer.invoke('get-window-bounds'),
+  onWindowBoundsChanged: (callback) => {
+    ipcRenderer.on('window-bounds-changed', (event, bounds) => callback(bounds));
+  },
+  onAlwaysOnTopChanged: (callback) => {
+    ipcRenderer.on('sticky-note-always-on-top-changed', (event, isAlwaysOnTop) => callback(isAlwaysOnTop));
+  },
+  
   // General IPC methods
   sendMessage: (channel, data) => {
     // Whitelist channels

@@ -1,13 +1,15 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
 import {
   Eye, EyeOff, Plus, Edit2, Trash2, X, Search, User, Minimize2, XCircle,
   Lock, FolderPlus, Copy, ExternalLink, CheckCircle, AlertCircle,
-  LogOut, ChevronDown, Minus
+  LogOut, ChevronDown, Minus, StickyNote, Maximize2
 } from 'lucide-react';
-import DraggableTitleBar from '@/components/DraggableTitlebar';
+import { apiClient } from '@/lib/api-client';
+import { useEffect, useState, useRef } from 'react';
+
+
 
 // ============================================================================
 // TOAST COMPONENT
@@ -24,10 +26,10 @@ const ToastContainer = ({ toasts, removeToast }: { toasts: Toast[]; removeToast:
       <div
         key={toast.id}
         className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl backdrop-blur border animate-in slide-in-from-right duration-200 text-sm font-medium ${toast.type === 'success'
-            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-            : toast.type === 'error'
-              ? 'bg-red-500/10 border-red-500/20 text-red-400'
-              : 'bg-[#D97757]/10 border-[#D97757]/20 text-[#D97757]'
+          ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+          : toast.type === 'error'
+            ? 'bg-red-500/10 border-red-500/20 text-red-400'
+            : 'bg-[#D97757]/10 border-[#D97757]/20 text-[#D97757]'
           }`}
       >
         {toast.type === 'success' && <CheckCircle className="w-4 h-4 flex-shrink-0" />}
@@ -102,6 +104,16 @@ const CATEGORY_PRESETS = [
   { id: 'notes', label: 'Notes', color: '#db2777' },
 ];
 
+// NOTE COLORS
+const NOTE_COLORS = [
+  { id: 'yellow', color: '#fbbf24', name: 'Yellow' },
+  { id: 'green', color: '#10b981', name: 'Green' },
+  { id: 'blue', color: '#3b82f6', name: 'Blue' },
+  { id: 'purple', color: '#a855f7', name: 'Purple' },
+  { id: 'pink', color: '#ec4899', name: 'Pink' },
+  { id: 'orange', color: '#D97757', name: 'Orange' },
+];
+
 // ============================================================================
 // TYPES
 // ============================================================================
@@ -125,6 +137,21 @@ interface Credential {
   created_at: string;
 }
 
+interface Note {
+  id: number;
+  title: string;
+  content: string;
+  color: string;
+  is_pinned: boolean;
+  is_floating: boolean;
+  position_x: number | null;
+  position_y: number | null;
+  width: number | null;
+  height: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
@@ -144,6 +171,17 @@ export default function DashboardPage() {
   const [showPassword, setShowPassword] = useState<{ [key: number]: boolean }>({});
   const [copiedId, setCopiedId] = useState<number | null>(null);
 
+  // Notes state
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [showNoteModal, setShowNoteModal] = useState(false);
+  const [editingNote, setEditingNote] = useState<Note | null>(null);
+  const [noteForm, setNoteForm] = useState({
+    title: '',
+    content: '',
+    color: '#fbbf24'
+  });
+  const [showAllNotes, setShowAllNotes] = useState(false);
+
   // Toasts
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -151,7 +189,7 @@ export default function DashboardPage() {
   const [showCredentialModal, setShowCredentialModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{ type: 'credential' | 'category'; id: number; title: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'credential' | 'category' | 'note'; id: number; title: string } | null>(null);
   const [editingCredential, setEditingCredential] = useState<Credential | null>(null);
 
   // Form states
@@ -168,6 +206,8 @@ export default function DashboardPage() {
     name: '',
     preset: 'vault'
   });
+
+  const dataLoadedRef = useRef(false);
 
   // ========== TOAST HELPER ==========
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -210,19 +250,15 @@ export default function DashboardPage() {
   // ========== AUTH CHECK ==========
   useEffect(() => {
     checkAuth();
-  }, [router]);
+  }, []);
 
   // ========== LOAD DATA WHEN UNLOCKED ==========
-// Run once after user authenticated
-useEffect(() => {
-  if (user) {
-    const sessionMP = sessionStorage.getItem('masterPassword');
-    if (sessionMP) {
-      setMasterPassword(sessionMP);
-      loadData(); // safe: only runs once when app loads
+  useEffect(() => {
+    if (user && masterPassword && !dataLoadedRef.current) {
+      dataLoadedRef.current = true;
+      loadData();
     }
-  }
-}, [user]);
+  }, [user]);
 
   // ========== DEBUG LOGGER ==========
   useEffect(() => {
@@ -230,9 +266,10 @@ useEffect(() => {
       user: user?.username,
       hasMasterPassword: !!masterPassword,
       categoriesCount: categories.length,
-      credentialsCount: credentials.length
+      credentialsCount: credentials.length,
+      notesCount: notes.length
     });
-  }, [user, masterPassword, categories, credentials]);
+  }, [user, masterPassword, categories, credentials, notes]);
 
   // ========== FILTER CREDENTIALS ==========
   useEffect(() => {
@@ -256,14 +293,12 @@ useEffect(() => {
 
       setUser(authData.user);
 
-      // Check if master password exists in session storage
-      const sessionMP = sessionStorage.getItem('masterPassword');
+      const sessionMP = sessionStorage.getItem('mp');
       console.log('Master password in session:', !!sessionMP);
 
       if (sessionMP) {
         setMasterPassword(sessionMP);
       } else {
-        // No master password in session, need to prompt user
         console.log('No master password found, showing prompt');
         setShowMasterPasswordPrompt(true);
       }
@@ -285,45 +320,25 @@ useEffect(() => {
       setError(null);
       setLoading(true);
 
-      console.log('Loading categories and credentials...');
+      console.log('Loading categories, credentials, and notes...');
+      sessionStorage.setItem('mp', masterPassword);
 
-      const [catRes, credRes] = await Promise.all([
-        fetch('/api/categories', { credentials: 'include' }),
-        fetch(`/api/credentials?masterPassword=${encodeURIComponent(masterPassword)}`, {
-          credentials: 'include'
-        })
+      // Use apiClient instead of fetch
+      const [catData, credData, notesData] = await Promise.all([
+        apiClient.fetchCategories(),
+        apiClient.fetchCredentials(),
+        apiClient.fetchNotes()
       ]);
-
-      console.log('Category response status:', catRes.status);
-      console.log('Credentials response status:', credRes.status);
-
-      if (!catRes.ok) {
-        const catError = await catRes.json();
-        console.error('Category fetch error:', catError);
-        throw new Error('Failed to load categories');
-      }
-
-      if (!credRes.ok) {
-        const credError = await credRes.json();
-        console.error('Credentials fetch error:', credError);
-        throw new Error('Failed to load credentials');
-      }
-
-      const catData = await catRes.json();
-      const credData = await credRes.json();
 
       console.log('Categories loaded:', catData.categories?.length || 0);
       console.log('Credentials loaded:', credData.credentials?.length || 0);
+      console.log('Notes loaded:', notesData.notes?.length || 0);
 
       setCategories(catData.categories || []);
       setCredentials(credData.credentials || []);
+      setNotes(notesData.notes || []);
 
-      // Store in session for persistence
-      sessionStorage.setItem('masterPassword', masterPassword);
-
-      // Hide the prompt on success
       setShowMasterPasswordPrompt(false);
-
       addToast('Vault unlocked', 'success');
     } catch (error: any) {
       console.error('Load data error:', error);
@@ -331,6 +346,8 @@ useEffect(() => {
       addToast('Invalid master password', 'error');
       setShowMasterPasswordPrompt(true);
       setMasterPassword('');
+      sessionStorage.removeItem('mp');
+      dataLoadedRef.current = false;
     } finally {
       setLoading(false);
     }
@@ -359,7 +376,7 @@ useEffect(() => {
   const handleLogout = async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
-      sessionStorage.removeItem('masterPassword');
+      sessionStorage.removeItem('mp');
       setMasterPassword('');
       window.location.href = '/';
     } catch (error) {
@@ -375,6 +392,7 @@ useEffect(() => {
     getElectronAPI()?.close();
   };
 
+  // ========== CREDENTIAL HANDLERS ==========
   const handleCreateCredential = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -406,7 +424,10 @@ useEffect(() => {
       if (res.ok) {
         setShowCredentialModal(false);
         resetCredentialForm();
-        loadData();
+        
+        const credData = await apiClient.fetchCredentials();
+        setCredentials(credData.credentials || []);
+        
         addToast('Credential created', 'success');
       } else {
         const data = await res.json();
@@ -446,7 +467,10 @@ useEffect(() => {
         setShowCredentialModal(false);
         setEditingCredential(null);
         resetCredentialForm();
-        loadData();
+        
+        const credData = await apiClient.fetchCredentials();
+        setCredentials(credData.credentials || []);
+        
         addToast('Credential updated', 'success');
       } else {
         const data = await res.json();
@@ -463,7 +487,9 @@ useEffect(() => {
     try {
       const res = await fetch(`/api/credentials?id=${deleteTarget.id}`, { method: 'DELETE' });
       if (res.ok) {
-        loadData();
+        const credData = await apiClient.fetchCredentials();
+        setCredentials(credData.credentials || []);
+        
         addToast('Credential deleted', 'success');
       } else {
         addToast('Failed to delete', 'error');
@@ -476,6 +502,7 @@ useEffect(() => {
     }
   };
 
+  // ========== CATEGORY HANDLERS ==========
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -500,7 +527,6 @@ useEffect(() => {
         setShowCategoryModal(false);
         setCategoryForm({ name: '', preset: 'vault' });
 
-        // Immediately fetch updated categories
         const catRes = await fetch('/api/categories', { credentials: 'include' });
         if (catRes.ok) {
           const catData = await catRes.json();
@@ -517,6 +543,93 @@ useEffect(() => {
     }
   };
 
+  // ========== NOTE HANDLERS ==========
+  const handleCreateNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!noteForm.title) {
+      addToast('Note title is required', 'error');
+      return;
+    }
+
+    try {
+      await apiClient.createNote({
+        title: noteForm.title,
+        content: noteForm.content,
+        color: noteForm.color
+      });
+
+      setShowNoteModal(false);
+      resetNoteForm();
+      
+      const notesData = await apiClient.fetchNotes();
+      setNotes(notesData.notes || []);
+      
+      addToast('Note created', 'success');
+    } catch (error: any) {
+      addToast(error.message || 'Failed to create note', 'error');
+    }
+  };
+
+  const handleUpdateNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingNote) return;
+
+    try {
+      await apiClient.updateNote(editingNote.id, {
+        title: noteForm.title,
+        content: noteForm.content,
+        color: noteForm.color
+      });
+
+      setShowNoteModal(false);
+      setEditingNote(null);
+      resetNoteForm();
+      
+      const notesData = await apiClient.fetchNotes();
+      setNotes(notesData.notes || []);
+      
+      addToast('Note updated', 'success');
+    } catch (error: any) {
+      addToast(error.message || 'Failed to update note', 'error');
+    }
+  };
+  
+  const handleDeleteNote = async () => {
+    if (!deleteTarget || deleteTarget.type !== 'note') return;
+
+    try {
+      await apiClient.deleteNote(deleteTarget.id);
+      
+      const notesData = await apiClient.fetchNotes();
+      setNotes(notesData.notes || []);
+      
+      addToast('Note deleted', 'success');
+    } catch (error: any) {
+      addToast(error.message || 'Failed to delete note', 'error');
+    } finally {
+      setShowDeleteConfirm(false);
+      setDeleteTarget(null);
+    }
+  };
+
+  const handlePopOutNote = (note: Note) => {
+    const electronAPI = getElectronAPI();
+    if (electronAPI && electronAPI.openStickyNote) {
+      electronAPI.openStickyNote(note.id.toString(), {
+        x: note.position_x,
+        y: note.position_y,
+        width: note.width,
+        height: note.height,
+        alwaysOnTop: true
+      });
+      addToast('Note popped out', 'success');
+    } else {
+      addToast('Pop-out only works in desktop app', 'error');
+    }
+  };
+
+  // ========== FORM HELPERS ==========
   const openEditModal = (credential: Credential) => {
     setEditingCredential(credential);
     setCredentialForm({
@@ -528,6 +641,16 @@ useEffect(() => {
       categoryId: credential.category_id
     });
     setShowCredentialModal(true);
+  };
+
+  const openEditNoteModal = (note: Note) => {
+    setEditingNote(note);
+    setNoteForm({
+      title: note.title,
+      content: note.content,
+      color: note.color
+    });
+    setShowNoteModal(true);
   };
 
   const resetCredentialForm = () => {
@@ -542,6 +665,15 @@ useEffect(() => {
     setEditingCredential(null);
   };
 
+  const resetNoteForm = () => {
+    setNoteForm({
+      title: '',
+      content: '',
+      color: '#fbbf24'
+    });
+    setEditingNote(null);
+  };
+
   const togglePasswordVisibility = (id: number) => {
     setShowPassword(prev => ({ ...prev, [id]: !prev[id] }));
   };
@@ -551,6 +683,15 @@ useEffect(() => {
     setCopiedId(id);
     addToast('Copied', 'success');
     setTimeout(() => setCopiedId(null), 1500);
+  };
+
+  // ========== GET MOST RECENT NOTE ==========
+  const getMostRecentNote = () => {
+    if (notes.length === 0) return null;
+    // Sort by updated_at descending and get the first one
+    return [...notes].sort((a, b) => 
+      new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+    )[0];
   };
 
   // ========== LOADING STATE ==========
@@ -567,13 +708,43 @@ useEffect(() => {
     );
   }
 
+  const mostRecentNote = getMostRecentNote();
+
   // ========== RENDER ==========
   return (
-    <div className="min-h-screen  bg-[#262624]">
+    <div className="min-h-screen bg-[#262624]">
+      {/* Custom Scrollbar Styles */}
+      <style jsx global>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 8px;
+          height: 8px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: #262624;
+          border-radius: 4px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #3a3a38;
+          border-radius: 4px;
+          transition: background 0.2s;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #D97757;
+        }
+        
+        /* Firefox */
+        .custom-scrollbar {
+          scrollbar-width: thin;
+          scrollbar-color: #3a3a38 #262624;
+        }
+      `}</style>
+
       {/* ===== HEADER / TITLE BAR ===== */}
       <header className="fixed top-0 drag left-0 right-0 h-14 bg-[#30302E] border-b border-[#3a3a38] z-40">
-        <div className="flex items-center justify-between h-full px-4 ">
-          {/* Left: App Name & Logo */}
+        <div className="flex items-center justify-between h-full px-4">
           <div className="flex items-center gap-3 min-w-fit">
             <div className="flex items-center justify-center w-8 h-8 bg-[#D97757] rounded-lg">
               <Lock className="w-4 h-4 text-white" />
@@ -581,7 +752,6 @@ useEffect(() => {
             <div className="text-sm font-bold text-white">SecureVault</div>
           </div>
 
-          {/* Center: Search Bar */}
           <div className="flex-1 no-drag max-w-xl mx-8">
             <div className="relative group">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-500" />
@@ -607,7 +777,6 @@ useEffect(() => {
             </div>
           </div>
 
-          {/* Right: User Welcome & Window Controls */}
           <div className="flex no-drag items-center gap-4">
             <div className="text-right">
               <div className="text-sm font-medium text-white">Welcome, {user?.username}</div>
@@ -636,10 +805,10 @@ useEffect(() => {
       </header>
 
       {/* ===== MAIN CONTENT ===== */}
-      <div className="flex pt-14">
-        {/* Sidebar */}
-        <aside className="w-64 border-r border-[#3a3a38] min-h-[calc(100vh-3.5rem)] overflow-y-auto bg-[#30302E]">
-          <div className="p-4 space-y-3">
+      <div className="flex pt-14 h-screen">
+        {/* Sidebar - Fixed, no scroll */}
+        <aside className="w-64 border-r border-[#3a3a38] h-[calc(100vh-3.5rem)] flex flex-col bg-[#30302E]">
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
             {/* User Info */}
             <div className="p-3 bg-[#262624] rounded-xl border border-[#3a3a38]">
               <div className="flex items-center gap-3">
@@ -680,8 +849,8 @@ useEffect(() => {
               <button
                 onClick={() => setSelectedCategory('all')}
                 className={`w-full text-left px-3 py-2.5 rounded-xl transition-colors text-sm font-medium mb-2 ${selectedCategory === 'all'
-                    ? 'bg-[#D97757] text-white'
-                    : 'text-gray-400 hover:bg-[#262624]'
+                  ? 'bg-[#D97757] text-white'
+                  : 'text-gray-400 hover:bg-[#262624]'
                   }`}
               >
                 <div className="flex items-center justify-between">
@@ -693,8 +862,8 @@ useEffect(() => {
               <button
                 onClick={() => setSelectedCategory(null)}
                 className={`w-full text-left px-3 py-2.5 rounded-xl transition-colors text-sm font-medium mb-3 ${selectedCategory === null
-                    ? 'bg-[#D97757] text-white'
-                    : 'text-gray-400 hover:bg-[#262624]'
+                  ? 'bg-[#D97757] text-white'
+                  : 'text-gray-400 hover:bg-[#262624]'
                   }`}
               >
                 <div className="flex items-center justify-between">
@@ -711,8 +880,8 @@ useEffect(() => {
                     key={cat.id}
                     onClick={() => setSelectedCategory(cat.id)}
                     className={`w-full text-left px-3 py-2.5 rounded-xl transition-colors text-sm font-medium ${selectedCategory === cat.id
-                        ? 'bg-[#D97757] text-white'
-                        : 'text-gray-400 hover:bg-[#262624]'
+                      ? 'bg-[#D97757] text-white'
+                      : 'text-gray-400 hover:bg-[#262624]'
                       }`}
                   >
                     <div className="flex items-center justify-between">
@@ -732,34 +901,234 @@ useEffect(() => {
               </div>
             </div>
 
-            {/* Logout */}
+            {/* ===== NOTES SECTION (UPDATED) ===== */}
             <div className="pt-3 border-t border-[#3a3a38]">
-              <button
-                onClick={handleLogout}
-                className="w-full bg-[#262624] text-gray-300 py-2.5 px-4 rounded-xl hover:bg-[#1f1f1d] border border-[#3a3a38] transition-colors flex items-center justify-center gap-2 font-medium text-sm"
-              >
-                <LogOut className="w-4 h-4" />
-                Logout
-              </button>
+              <div className="flex items-center justify-between mb-3 px-1">
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Sticky Notes</h3>
+                <button
+                  onClick={() => {
+                    resetNoteForm();
+                    setShowNoteModal(true);
+                  }}
+                  className="p-1 hover:bg-[#262624] rounded-lg transition-colors text-gray-500 hover:text-[#D97757]"
+                  title="New Note"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {notes.length === 0 ? (
+                  <div className="text-center py-4 px-3">
+                    <StickyNote className="w-8 h-8 text-gray-600 mx-auto mb-2" />
+                    <p className="text-xs text-gray-500">No notes yet</p>
+                    <button
+                      onClick={() => {
+                        resetNoteForm();
+                        setShowNoteModal(true);
+                      }}
+                      className="text-xs text-[#D97757] hover:text-[#c26848] mt-2"
+                    >
+                      Create your first note
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {/* Show only the most recent note */}
+                    {mostRecentNote && (
+                      <div className="group p-2.5 bg-[#262624] border border-[#3a3a38] rounded-xl hover:border-[#D97757]/30 transition-all">
+                        <div className="flex items-start gap-2">
+                          <div
+                            className="w-2 h-2 rounded-full mt-1 flex-shrink-0"
+                            style={{ backgroundColor: mostRecentNote.color }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-xs font-medium text-white truncate">{mostRecentNote.title}</h4>
+                            <p className="text-[10px] text-gray-500 line-clamp-1 mt-0.5">
+                              {mostRecentNote.content || 'Empty note'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => handlePopOutNote(mostRecentNote)}
+                            className="flex-1 px-1.5 py-1 text-[10px] bg-[#30302E] hover:bg-[#3a3a38] text-gray-400 hover:text-white rounded-lg transition-colors flex items-center justify-center gap-1"
+                            title="Pop Out"
+                          >
+                            <Maximize2 className="w-2.5 h-2.5" />
+                            <span>Pop Out</span>
+                          </button>
+                          <button
+                            onClick={() => openEditNoteModal(mostRecentNote)}
+                            className="p-1 text-gray-500 hover:text-[#D97757] hover:bg-[#30302E] rounded-lg transition-colors"
+                            title="Edit"
+                          >
+                            <Edit2 className="w-2.5 h-2.5" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setDeleteTarget({ type: 'note', id: mostRecentNote.id, title: mostRecentNote.title });
+                              setShowDeleteConfirm(true);
+                            }}
+                            className="p-1 text-gray-500 hover:text-red-400 hover:bg-[#30302E] rounded-lg transition-colors"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* View All button */}
+                    {notes.length > 0 && (
+                      <button
+                        onClick={() => setShowAllNotes(true)}
+                        className="w-full px-3 py-2 text-xs font-medium text-[#D97757] hover:text-[#c26848] bg-[#262624] hover:bg-[#1f1f1d] border border-[#3a3a38] rounded-xl transition-colors flex items-center justify-center gap-1"
+                      >
+                        <StickyNote className="w-3 h-3" />
+                        <span>View All {notes.length} Notes</span>
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
+          </div>
+
+          {/* Fixed Logout at Bottom (SINGLE BUTTON) */}
+          <div className="p-4 border-t border-[#3a3a38] bg-[#30302E]">
+            <button
+              onClick={handleLogout}
+              className="w-full bg-[#262624] text-gray-300 py-2.5 px-4 rounded-xl hover:bg-[#1f1f1d] border border-[#3a3a38] transition-colors flex items-center justify-center gap-2 font-medium text-sm"
+            >
+              <LogOut className="w-4 h-4" />
+              Logout
+            </button>
           </div>
         </aside>
 
-        {/* Main Content */}
-        <main className="flex-1 overflow-y-auto">
+        {/* Main Content - Scrollable with custom scrollbar */}
+        <main className="flex-1 h-[calc(100vh-3.5rem)] overflow-y-auto custom-scrollbar">
           <div className="p-6">
             <div className="max-w-6xl">
               {/* Page Header */}
               <div className="mb-6">
                 <h1 className="text-2xl font-bold text-white mb-1">
-                  {selectedCategory === 'all' ? 'All Passwords' :
-                    selectedCategory === null ? 'Uncategorized' :
-                      categories.find(c => c.id === selectedCategory)?.name || 'Passwords'}
+                  {showAllNotes ? 'All Sticky Notes' :
+                    selectedCategory === 'all' ? 'All Passwords' :
+                      selectedCategory === null ? 'Uncategorized' :
+                        categories.find(c => c.id === selectedCategory)?.name || 'Passwords'}
                 </h1>
-                <p className="text-sm text-gray-500">{filteredCredentials.length} credentials</p>
+                <p className="text-sm text-gray-500">
+                  {showAllNotes ? `${notes.length} notes` : `${filteredCredentials.length} credentials`}
+                </p>
               </div>
 
-              {/* Credentials Grid */}
+              {/* Notes Grid View */}
+              {showAllNotes ? (
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <button
+                      onClick={() => setShowAllNotes(false)}
+                      className="text-sm text-[#D97757] hover:text-[#c26848] flex items-center gap-2"
+                    >
+                      ← Back to Passwords
+                    </button>
+                    <button
+                      onClick={() => {
+                        resetNoteForm();
+                        setShowNoteModal(true);
+                      }}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-[#D97757] text-white rounded-xl hover:bg-[#c26848] transition-colors font-medium text-sm"
+                    >
+                      <Plus className="w-4 h-4" />
+                      New Note
+                    </button>
+                  </div>
+
+                  {notes.length === 0 ? (
+                    <div className="text-center py-16 bg-[#30302E] rounded-2xl border border-[#3a3a38]">
+                      <StickyNote className="w-12 h-12 text-gray-600 mx-auto mb-4" />
+                      <h3 className="text-lg font-semibold text-white mb-1">No notes yet</h3>
+                      <p className="text-sm text-gray-500 mb-6">Create your first sticky note</p>
+                      <button
+                        onClick={() => {
+                          resetNoteForm();
+                          setShowNoteModal(true);
+                        }}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#D97757] text-white rounded-xl hover:bg-[#c26848] transition-colors font-medium text-sm"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Create Note
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {notes.map(note => (
+                        <div
+                          key={note.id}
+                          className="group bg-[#30302E] border border-[#3a3a38] rounded-2xl overflow-hidden hover:border-[#D97757]/30 transition-all duration-300"
+                          style={{ backgroundColor: `${note.color}20` }}
+                        >
+                          <div className="p-4 border-b border-[#3a3a38]">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <div
+                                  className="w-3 h-3 rounded-full flex-shrink-0"
+                                  style={{ backgroundColor: note.color }}
+                                />
+                                <h3 className="font-semibold text-white text-sm truncate">{note.title}</h3>
+                              </div>
+                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                  onClick={() => handlePopOutNote(note)}
+                                  className="p-1.5 text-gray-500 hover:text-[#D97757] hover:bg-[#262624] rounded-lg transition-colors"
+                                  title="Pop Out"
+                                >
+                                  <Maximize2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => openEditNoteModal(note)}
+                                  className="p-1.5 text-gray-500 hover:text-[#D97757] hover:bg-[#262624] rounded-lg transition-colors"
+                                  title="Edit"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setDeleteTarget({ type: 'note', id: note.id, title: note.title });
+                                    setShowDeleteConfirm(true);
+                                  }}
+                                  className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-[#262624] rounded-lg transition-colors"
+                                  title="Delete"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="p-4">
+                            <p className="text-sm text-gray-300 whitespace-pre-wrap line-clamp-6">
+                              {note.content || 'Empty note'}
+                            </p>
+                          </div>
+                          <div className="px-4 py-3 bg-[#262624] border-t border-[#3a3a38]">
+                            <p className="text-xs text-gray-600">
+                              Updated {new Date(note.updated_at).toLocaleDateString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                year: 'numeric'
+                              })}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  {/* Credentials Grid */}
               {filteredCredentials.length === 0 ? (
                 <div className="text-center py-16 bg-[#30302E] rounded-2xl border border-[#3a3a38]">
                   <Lock className="w-12 h-12 text-gray-600 mx-auto mb-4" />
@@ -904,6 +1273,8 @@ useEffect(() => {
                   ))}
                 </div>
               )}
+                </>
+              )}
             </div>
           </div>
         </main>
@@ -1047,8 +1418,8 @@ useEffect(() => {
                       type="button"
                       onClick={() => setCategoryForm({ ...categoryForm, preset: preset.id })}
                       className={`p-4 rounded-xl border-2 transition-colors text-center ${categoryForm.preset === preset.id
-                          ? 'border-[#D97757] bg-[#D97757]/10'
-                          : 'border-[#3a3a38] bg-[#262624] hover:border-[#4a4a48]'
+                        ? 'border-[#D97757] bg-[#D97757]/10'
+                        : 'border-[#3a3a38] bg-[#262624] hover:border-[#4a4a48]'
                         }`}
                     >
                       <div
@@ -1093,13 +1464,96 @@ useEffect(() => {
         </div>
       )}
 
+      {/* ===== NOTE MODAL ===== */}
+      {showNoteModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-[#30302E] rounded-2xl w-full max-w-lg shadow-2xl border border-[#3a3a38] animate-in zoom-in-95 duration-200">
+            <div className="border-b border-[#3a3a38] p-5 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-white">
+                {editingNote ? 'Edit Note' : 'New Sticky Note'}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowNoteModal(false);
+                  resetNoteForm();
+                }}
+                className="p-2 hover:bg-[#262624] rounded-lg transition-colors text-gray-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={editingNote ? handleUpdateNote : handleCreateNote} className="p-5 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-300 mb-2">Title *</label>
+                <input
+                  type="text"
+                  value={noteForm.title}
+                  onChange={(e) => setNoteForm({ ...noteForm, title: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-[#262624] border border-[#3a3a38] rounded-xl focus:ring-1 focus:ring-[#D97757] focus:border-[#D97757] outline-none transition-colors text-white placeholder-gray-600"
+                  placeholder="My Note"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-300 mb-2">Color</label>
+                <div className="grid grid-cols-6 gap-2">
+                  {NOTE_COLORS.map(colorOption => (
+                    <button
+                      key={colorOption.id}
+                      type="button"
+                      onClick={() => setNoteForm({ ...noteForm, color: colorOption.color })}
+                      className={`w-10 h-10 rounded-lg transition-all ${noteForm.color === colorOption.color
+                        ? 'ring-2 ring-white ring-offset-2 ring-offset-[#30302E] scale-110'
+                        : 'hover:scale-105'
+                        }`}
+                      style={{ backgroundColor: colorOption.color }}
+                      title={colorOption.name}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-300 mb-2">Content</label>
+                <textarea
+                  value={noteForm.content}
+                  onChange={(e) => setNoteForm({ ...noteForm, content: e.target.value })}
+                  className="w-full px-4 py-2.5 bg-[#262624] border border-[#3a3a38] rounded-xl focus:ring-1 focus:ring-[#D97757] focus:border-[#D97757] outline-none transition-colors resize-none text-white placeholder-gray-600"
+                  rows={5}
+                  placeholder="Write your note here..."
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowNoteModal(false);
+                    resetNoteForm();
+                  }}
+                  className="flex-1 px-4 py-2.5 border border-[#3a3a38] rounded-xl hover:bg-[#262624] transition-colors font-medium text-gray-300 text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2.5 bg-[#D97757] text-white rounded-xl hover:bg-[#c26848] transition-colors font-medium text-sm"
+                >
+                  {editingNote ? 'Update' : 'Create'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ===== MASTER PASSWORD PROMPT ===== */}
       {showMasterPasswordPrompt && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-        {/* <DraggableTitleBar /> */}
           <header className="h-14 drag absolute w-full top-0 bg-[#30302E] border-b border-[#3a3a38]">
             <div className="flex items-center justify-between h-full px-4">
-              {/* Left: App Name & Logo */}
               <div className="flex items-center gap-3">
                 <div className="flex items-center justify-center w-8 h-8 bg-[#D97757] rounded-lg">
                   <Lock className="w-4 h-4 text-white" />
@@ -1107,7 +1561,6 @@ useEffect(() => {
                 <div className="text-sm font-bold text-white">SecureVault</div>
               </div>
 
-              {/* Right: Window Controls */}
               <div className="flex no-drag items-center gap-2">
                 <button
                   onClick={handleMinimize}
@@ -1127,12 +1580,11 @@ useEffect(() => {
               </div>
             </div>
           </header>
-          {/* <DraggableTitleBar /> */}
+
           <div className="bg-[#30302E] rounded-2xl w-full max-w-sm shadow-2xl border border-[#3a3a38]">
             <div className="p-6 border-b border-[#3a3a38] text-center">
               <div className="inline-flex items-center justify-center w-12 h-12 bg-[#D97757]/10 rounded-xl mb-4">
                 <Lock className="w-6 h-6 text-[#D97757]" />
-
               </div>
               <h3 className="text-lg font-bold text-white mb-1">Unlock Your Vault</h3>
               <p className="text-sm text-gray-400">Enter your password to decrypt your vault</p>
@@ -1140,6 +1592,11 @@ useEffect(() => {
 
             <form onSubmit={(e) => {
               e.preventDefault();
+              if (!masterPassword) {
+                addToast('Please enter your master password', 'error');
+                return;
+              }
+              sessionStorage.setItem('mp', masterPassword);
               loadData();
             }} className="p-6 space-y-4">
               <div>
@@ -1147,7 +1604,9 @@ useEffect(() => {
                 <input
                   type="password"
                   value={masterPassword}
-                  onChange={(e) => setMasterPassword(e.target.value)}
+                  onChange={(e) => {
+                    setMasterPassword(e.target.value);
+                  }}
                   className="w-full px-4 py-2.5 bg-[#262624] border border-[#3a3a38] rounded-xl focus:ring-1 focus:ring-[#D97757] focus:border-[#D97757] outline-none transition-colors text-white placeholder-gray-600 font-mono"
                   placeholder="••••••••••••"
                   autoFocus
@@ -1180,7 +1639,13 @@ useEffect(() => {
       <DeleteConfirmModal
         isOpen={showDeleteConfirm}
         title={deleteTarget?.title || ''}
-        onConfirm={handleDeleteCredential}
+        onConfirm={
+          deleteTarget?.type === 'credential'
+            ? handleDeleteCredential
+            : deleteTarget?.type === 'note'
+              ? handleDeleteNote
+              : () => { }
+        }
         onCancel={() => {
           setShowDeleteConfirm(false);
           setDeleteTarget(null);
